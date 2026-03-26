@@ -1,0 +1,663 @@
+
+IMPLEMENTATION
+GUIDE
+
+Smart Off-Grid Mesh Communication System
+Complete Step-by-Step Technical Build Plan
+
+
+37+ steps across 3 phases, from machine setup to demo day.
+
+Phase 1 (MVP): Steps 0–25. Machine setup from scratch, fully working system: 3–4 ESP32 nodes (ESP-NOW) + Android app (all AI) + browser fallback + central node command dashboard. The most time-intensive phase.
+Phase 2 (LoRa): Steps 26–29. Add LoRa modules to existing nodes. Radio abstraction makes this additive, not destructive.
+Phase 3 (Refinements): Steps 30–37. Clustering, encryption, acoustic sensing, STT, enclosures, demo polish. All additive.
+
+Team Ramuloo Ramulaa  •  Makeathon 2026
+
+Implementation Guide: Overview
+This document is a step-by-step technical guide to build the complete project from zero to finished product. It is organized into three phases that build on each other without requiring destructive rework between phases. The codebase from Phase 1 is extended in Phase 2 and refined in Phase 3 — nothing is thrown away.
+Phase 1 (MVP): Fully functioning app + web interface + mesh algorithm on 3–4 ESP32 nodes using ESP-NOW only. This is the most time-consuming phase. Everything must work end-to-end before moving forward.
+Phase 2 (LoRa Integration): Add LoRa modules to existing nodes. The radio abstraction layer built in Phase 1 makes this a driver addition, not a rewrite. This is what we present to judges.
+Phase 3 (Refinements): Clustering, delay-tolerant networking, acoustic sensing, STT pipeline, security hardening, 3D-printed enclosures, and demo polish. These are additive features on top of a working system.
+
+Project File Structure
+The project has three independent repositories/folders that communicate over WebSocket:
+project/
+  firmware/          ← ESP32 Arduino/PlatformIO project
+    src/
+      main.cpp
+      radio/          ← Radio abstraction + drivers
+      mesh/           ← Mesh protocol logic
+      app/            ← Captive portal + WebSocket + OLED + SOS
+      config.h        ← Compile flags, constants
+  mobile_app/        ← Flutter Android project
+    lib/
+      communication/  ← WiFi + WebSocket layer
+      ai/             ← All AI modules (classifier, NER, chatbot, etc.)
+      data/           ← SQLite + state management
+      ui/             ← Screens + widgets
+    assets/           ← TF-Lite models, knowledge base JSON
+  ai_training/       ← Colab notebooks for model training
+    classifier/
+    ner/
+    chatbot_kb/
+
+Step 0: Complete Machine Setup From Scratch
+Assume a fresh laptop with nothing installed. Follow every sub-step in order. Do not skip ahead.
+0.1 Operating System
+Windows 10/11, macOS, or Ubuntu Linux all work. The guide uses Windows paths where relevant but all tools are cross-platform. If on Windows, install Windows Terminal from the Microsoft Store — it’s far better than the default cmd.
+0.2 Install VS Code
+Download VS Code from https://code.visualstudio.com/. Install with default settings. Check “Add to PATH” during installation (Windows).
+Launch VS Code. Open the Extensions panel (Ctrl+Shift+X). Install these extensions in this order:
+PlatformIO IDE — search “platformio”, install the one by PlatformIO (5M+ downloads). This will auto-install Python and all ESP32 toolchains. First install takes 5–10 minutes.
+Flutter — search “Flutter”, install the one by Dart Code. This also installs the Dart extension.
+C/C++ — search “C/C++” by Microsoft. Provides IntelliSense for ESP32 firmware code.
+GitLens (optional) — better Git integration within VS Code.
+Restart VS Code after all extensions are installed. Wait for PlatformIO to finish its initial setup (watch the bottom status bar — it shows “PlatformIO: Loading...” until ready).
+0.3 Install Git
+Windows: download from https://git-scm.com/download/win. Install with default settings. Verify: open a terminal and type git --version.
+macOS: git is pre-installed. Verify with git --version. If not found, run xcode-select --install.
+Linux: sudo apt install git.
+0.4 Install Flutter SDK
+Go to https://docs.flutter.dev/get-started/install. Follow your OS-specific instructions.
+Windows: download the Flutter SDK zip. Extract to C:\flutter (not inside Program Files — spaces in path cause issues). Add C:\flutter\bin to your system PATH environment variable.
+macOS: download the Flutter SDK. Extract to ~/flutter. Add export PATH=”$PATH:$HOME/flutter/bin” to your ~/.zshrc.
+Linux: download the Flutter SDK. Extract to ~/flutter. Add to PATH in ~/.bashrc.
+Open a NEW terminal (important — PATH changes require a new terminal). Run: flutter doctor. This shows you what’s missing.
+0.5 Install Android SDK
+Option A (recommended): Install Android Studio from https://developer.android.com/studio. You don’t need to USE Android Studio — you just need its SDK. During installation, make sure “Android SDK”, “Android SDK Command-line Tools”, and “Android SDK Build-Tools” are checked.
+Option B (lighter): Install command-line tools only from https://developer.android.com/studio#command-tools. Set ANDROID_HOME environment variable to the SDK path. Run sdkmanager “platform-tools” “platforms;android-34” “build-tools;34.0.0”.
+Accept Android licenses: run flutter doctor --android-licenses and type “y” to accept all.
+Run flutter doctor again. The Android toolchain should show a green checkmark. If it says “Android SDK not found,” set the ANDROID_HOME or ANDROID_SDK_ROOT environment variable to where the SDK was installed (usually C:\Users\YourName\AppData\Local\Android\Sdk on Windows, ~/Android/Sdk on Linux).
+0.6 Setup Your Android Phone for Development
+On your Android phone: go to Settings → About Phone → tap “Build Number” 7 times. This enables Developer Options.
+Go to Settings → Developer Options → enable “USB Debugging.”
+Connect phone to laptop via USB cable. A popup appears on the phone: “Allow USB debugging?” Tap Allow (and check “Always allow from this computer”).
+On laptop terminal, run: flutter devices. Your phone should appear in the list. If it doesn’t, try a different USB cable (some cables are charge-only) or install your phone manufacturer’s USB drivers.
+Enable “Stay Awake” in Developer Options (keeps screen on while charging — useful during development).
+Enable “Mobile data always active” in Developer Options. This is critical — when the phone connects to the ESP32’s WiFi (which has no internet), Android normally disables the WiFi connection to fall back to cellular data. This setting prevents that behavior.
+0.7 Install ESP32 USB Drivers
+Most ESP32 dev boards use either CP2102 or CH340 USB-to-serial chips. Your laptop needs the corresponding driver to communicate with the ESP32.
+CP2102 driver: download from Silicon Labs (https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers). Install. This covers most ESP32 DevKitC and Heltec boards.
+CH340 driver: download from the CH340 manufacturer (http://www.wch-ic.com/downloads/CH341SER_EXE.html). Install. This covers many budget ESP32 boards from Amazon India and Robocraze.
+After installing drivers, plug in an ESP32 via USB. On Windows, check Device Manager → Ports — you should see “COM3” or similar. On macOS/Linux, run ls /dev/tty.* or ls /dev/ttyUSB* — you should see the ESP32.
+In VS Code, PlatformIO auto-detects the port. If not, manually set upload_port = COM3 (or /dev/ttyUSB0) in platformio.ini.
+0.8 Install Python (for AI Training Tools)
+Download Python 3.10+ from https://www.python.org/downloads/. During installation on Windows, CHECK “Add Python to PATH.”
+Verify: python --version in terminal. If it shows Python 2.x or “not found,” check your PATH or try python3 --version.
+Install basic ML packages locally (for testing exported models): pip install tensorflow numpy. The actual training happens in Colab (free GPU), but you need TF locally to verify TF-Lite model loading.
+0.9 Verify Everything Works
+Run flutter doctor — should show green checkmarks for Flutter, Android toolchain, and Connected device.
+In VS Code, open a terminal, type pio --version — should print PlatformIO version.
+Plug in an ESP32, open PlatformIO Home (alien icon in VS Code sidebar), create a new project (board: esp32dev, framework: arduino). Click Build (checkmark icon). If it compiles with zero errors, PlatformIO is working.
+Run flutter create test_app && cd test_app && flutter run. If the default Flutter counter app appears on your phone, Flutter is working. Delete the test_app folder.
+Open Google Colab (https://colab.research.google.com) in your browser. Create a new notebook. Run !nvidia-smi to verify GPU access on the free tier. If it shows a GPU, Colab is ready for model training.
+Only proceed to the project when ALL five checks above pass.
+0.10 Create the Project Folder
+Create the project root: mkdir meshlink && cd meshlink && git init.
+Create subdirectories: mkdir firmware mobile_app ai_training.
+In VS Code, open the meshlink folder (File → Open Folder). This is your workspace for the entire project. You’ll switch between firmware/ and mobile_app/ using the VS Code Explorer panel.
+Create a .gitignore in the root with: .pio/, build/, .dart_tool/, *.tflite, .flutter-plugins, .packages.
+Make your first commit: git add . && git commit -m “initial project structure.”
+
+Development Environment & Tooling
+One IDE for everything: Use VS Code as your single development environment for all three parts of the project. Having one IDE eliminates context-switching overhead and lets you use integrated terminals, split panes, and extensions for everything.
+Firmware Development
+Install VS Code + PlatformIO extension (not Arduino IDE). PlatformIO handles multi-file projects, library management, serial monitoring, and compilation far better than Arduino IDE. It auto-detects ESP32 boards and manages the ESP-IDF/Arduino framework.
+In platformio.ini set: platform = espressif32, board = esp32dev, framework = arduino, monitor_speed = 115200, lib_deps = ESPAsyncWebServer, AsyncTCP, ArduinoJson, Adafruit SSD1306, Adafruit GFX. Add build_flags = -DUSE_ESPNOW=1 -DUSE_LORA=0 for compile flag control.
+Use PlatformIO’s serial monitor (bottom toolbar icon) for real-time debug output. Keep it open in a split terminal while coding.
+Use PlatformIO’s Upload button (arrow icon) to flash. It auto-detects the ESP32’s USB port. If you have multiple ESP32s connected, use the upload_port setting in platformio.ini to target a specific one.
+For multi-node testing: use multiple VS Code terminal tabs, each monitoring a different ESP32’s serial port. Label them Node A, Node B, Node C.
+App Development
+Install Flutter SDK + VS Code Flutter/Dart extensions. Use flutter doctor to verify setup. Connect an Android phone via USB for live debugging.
+Use VS Code’s Run & Debug panel (F5) with the Flutter configuration. This gives you hot reload (instant UI changes without recompiling), breakpoints, variable inspection, and the Flutter DevTools widget inspector.
+For WiFi testing: the phone must be connected to the ESP32’s mesh WiFi, which means it can’t use ADB over WiFi simultaneously. Use USB debugging. Alternatively, use Android’s developer option to keep cellular data active while connected to the mesh WiFi (Settings → Developer Options → Mobile data always active).
+For TF-Lite model testing: flutter run deploys the app with assets. Models in the assets/ai/ folder are bundled into the APK automatically if declared in pubspec.yaml under the assets: section.
+AI Model Training
+Use Google Colab (free GPU tier) for all model training. Save notebooks in the ai_training/ folder of your repo. Export trained models as .tflite files and copy them to mobile_app/assets/ai/.
+For the chatbot knowledge base: use any text editor or a simple Python script to build the JSON. The MiniLM embedding step runs in Colab as a batch job — embed all 300–500 questions in one pass, save the vectors alongside the Q&A in a single JSON file.
+Version Control
+Use Git from the start. Initialize a repo in the project root. Use .gitignore to exclude: .pio/ (PlatformIO build files), build/ (Flutter build), *.tflite (large model files — track these separately or use Git LFS). Commit after every working step.
+Branch strategy: main branch is always working. Feature branches for each major step (e.g., feature/captive-portal, feature/classifier). Merge to main only after testing.
+Testing Without All Hardware
+You can develop and test the Flutter app WITHOUT ESP32 nodes by running a mock WebSocket server on your laptop. Create a simple Python WebSocket server (using the websockets library) that simulates mesh messages. This lets the app team work in parallel with the firmware team.
+You can test ESP32 firmware WITHOUT phones by using the Serial Monitor as the “user.” Send JSON commands via Serial to simulate phone inputs. Monitor mesh traffic in the serial output.
+The AI models can be developed and tested entirely in Colab/Python before ever touching Flutter. Export to TF-Lite, test with a Python TF-Lite interpreter, then integrate into the app.
+
+PHASE 1    Minimum Viable Product
+Goal: A complete working system with 3–4 ESP32 nodes communicating via ESP-NOW, an Android app with all AI features, and a browser fallback interface. Everything works end-to-end. This is the phase that takes the most effort.
+1A. Firmware: ESP32 Mesh
+Step 1: Development Environment Setup
+Install PlatformIO (recommended over Arduino IDE for multi-file projects) or Arduino IDE with ESP32 board support.
+Create a new PlatformIO project targeting ESP32 Dev Module (esp32dev).
+Install required libraries: ESPAsyncWebServer, AsyncTCP, ArduinoJson, Adafruit_SSD1306, Adafruit_GFX.
+Create the folder structure: src/radio/, src/mesh/, src/app/.
+Create config.h with compile flags: #define USE_ESPNOW 1, #define USE_LORA 0, #define NODE_COUNT_CLUSTER_THRESHOLD 15, #define BEACON_INTERVAL_MS 2000, #define DEDUP_CACHE_TTL_SEC 60, #define DEFAULT_TTL 7, #define MAX_PHONES_PER_NODE 4, #define RATE_LIMIT_MSG_PER_MIN 5.
+Create a basic main.cpp that initializes Serial at 115200 for debug output and prints “Node booting...”. Flash to one ESP32. Verify it compiles and runs.
+Step 2: Radio Abstraction Layer
+This is the most important architectural decision. Build it right and Phase 2 becomes trivial.
+Step 2a: Define the Radio Interface
+Create src/radio/radio_interface.h. Define a pure virtual class (interface) called RadioDriver with three methods:
+bool init() — initialize the radio hardware, return true on success, false on failure
+bool send(const uint8_t* data, size_t len) — broadcast a raw packet, return success/fail
+void setReceiveCallback(void (*callback)(const uint8_t* data, size_t len)) — register a function that gets called when a packet arrives
+Also define a RadioStatus enum with three states: ACTIVE, DEGRADED, FAILED. Each driver tracks its own status based on consecutive failure counts.
+Step 2b: Implement the ESP-NOW Driver
+Create src/radio/espnow_driver.h and espnow_driver.cpp. This class implements RadioDriver.
+In init(): call esp_now_init(). Register an ESP-NOW send callback and receive callback. Set the WiFi mode to WIFI_AP_STA (this is critical — it allows SoftAP for the captive portal and ESP-NOW simultaneously). Fix the WiFi channel to 1 (all nodes must be on the same channel). Return true if esp_now_init() succeeds.
+In send(): broadcast the packet to the ESP-NOW broadcast address (FF:FF:FF:FF:FF:FF). Wrap in try-catch. If sending fails, increment a failureCount. If failureCount exceeds 10, set status to FAILED. On success, reset failureCount to 0.
+In the receive callback: the ESP-NOW receive callback is a static C function (ESP-IDF requirement). Use a static pointer to forward received data to the registered callback function. The callback passes raw bytes and length to the mesh layer.
+Add a recover() method: if status is FAILED, attempt esp_now_deinit() then esp_now_init(). If successful, reset status to ACTIVE. Call this periodically (every 10 seconds) from the main loop.
+Step 2c: Implement the LoRa Driver Stub
+Create src/radio/lora_driver.h and lora_driver.cpp. This implements RadioDriver but is compiled only when USE_LORA is enabled. For now, write the complete structure with empty method bodies that return false. The actual LoRa SPI communication code is written in Phase 2. Having the file structure ready means Phase 2 is a fill-in-the-blanks exercise, not a restructuring.
+Step 2d: Implement the Radio Manager
+Create src/radio/radio_manager.h and radio_manager.cpp. This class owns all radio drivers and dispatches calls.
+On init(): iterate through all enabled drivers (based on compile flags). Call init() on each. Log which radios are active. If a driver fails init, log a warning but continue — the system works with any subset of radios.
+On send(): iterate through all ACTIVE drivers. For each, wrap the send() call in try-catch. If one radio fails, log it and continue to the next. If the send succeeds on at least one radio, return true.
+Register a single unified receive callback: when any radio driver receives a packet, it calls the same callback function. The mesh layer doesn’t know or care which radio delivered the packet.
+Add a periodic health check: every 10 seconds, call recover() on any FAILED drivers. Log status changes.
+Step 2e: Verify Radio Layer
+Flash the firmware to two ESP32 boards. On Board A, send a hardcoded test packet every second via RadioManager. On Board B, print received packets to Serial. Verify packets arrive. Move Board B farther away and test range. This validates the entire radio abstraction before building anything on top.
+Step 3: Packet Structure
+Create src/mesh/packet.h. Define the MeshPacket struct:
+struct MeshPacket {
+  uint8_t  msgId[16];     // Random unique ID
+  uint8_t  srcNode[6];    // Sender MAC
+  uint8_t  destNode[6];   // Target MAC or 0xFF broadcast
+  uint8_t  ttl;           // Hops remaining
+  uint8_t  hopCount;      // Hops traveled
+  uint8_t  msgType;       // USER_MSG, SOS, BEACON, HEALTH, etc.
+  uint32_t timestamp;     // Unix seconds
+  uint8_t  payloadLen;    // Payload size
+  uint8_t  payload[200];  // Message data
+};  // Total: ~232 bytes, fits in ESP-NOW 250 byte limit
+Create serialize() and deserialize() functions that convert MeshPacket to/from raw uint8_t arrays. Create generateMsgId() that fills msgId with 16 random bytes using esp_random(). Create getNodeId() that reads the ESP32’s WiFi MAC address into a 6-byte array.
+Define message type constants: MSG_USER=0x01, MSG_SOS=0x02, MSG_BEACON=0x03, MSG_HEALTH=0x04, MSG_CLUSTER_CMD=0x05, MSG_ACK=0x06.
+Step 4: Deduplication Cache
+Create src/mesh/dedup_cache.h and dedup_cache.cpp.
+Implement a hash map (or simple array for MVP) that stores message IDs and the timestamp when they were first seen. Key: 16-byte msgId. Value: uint32_t timestamp.
+Implement hasSeen(msgId): returns true if the msgId exists in the cache and the entry is less than 60 seconds old.
+Implement markSeen(msgId): adds the msgId with current timestamp.
+Implement cleanup(): iterate the cache and remove entries older than 60 seconds. Call this every 10 seconds from the main loop to bound memory usage.
+For MVP, a fixed-size array of 512 entries is sufficient. Each entry is 20 bytes (16 ID + 4 timestamp) = 10KB total. Well within ESP32’s RAM.
+Step 5: Mesh Routing Engine
+Create src/mesh/routing.h and routing.cpp. This is the core of the mesh.
+Step 5a: Sending a Message
+When the application layer calls routingEngine.sendMessage(payload, type): create a new MeshPacket with a fresh random msgId, source = this node’s MAC, destination = broadcast (0xFF), ttl = DEFAULT_TTL (7), hopCount = 0, timestamp = current unix time, msgType = type, and the payload.
+Call dedupCache.markSeen(msgId) — mark our own message so we don’t reprocess it when it echoes back from neighbors.
+Serialize the packet and pass to radioManager.send(). Log success/failure.
+Also deliver the message to the local application layer (so the sender’s own phone sees the message immediately via WebSocket push).
+Step 5b: Receiving and Forwarding
+The RadioManager’s receive callback fires with raw bytes. Deserialize into MeshPacket.
+Check timestamp: if abs(currentTime - packet.timestamp) > 60 seconds, drop silently. This prevents replay attacks.
+Check dedup: if dedupCache.hasSeen(packet.msgId), drop silently. This prevents loops.
+Mark seen: dedupCache.markSeen(packet.msgId).
+Deliver locally: pass the packet to the application layer. The captive portal pushes it to connected phones. The OLED updates if it’s an SOS.
+Forward decision: if packet.ttl > 1, decrement ttl, increment hopCount, re-serialize, and call radioManager.send(). If ttl == 1, this is the last hop — deliver locally but don’t rebroadcast.
+Step 5c: Verify Multi-Hop
+Flash three ESP32 boards. Place Board B between A and C such that A and C cannot hear each other directly (move them far enough apart or reduce ESP-NOW TX power in code). Send a message from A. Verify it arrives at C through B by checking hop count (should be 2). This proves multi-hop managed flooding works.
+Step 6: Beacon System and Neighbor Discovery
+Create src/mesh/beacons.h and beacons.cpp.
+Every BEACON_INTERVAL_MS (2000ms), create a beacon MeshPacket with msgType = MSG_BEACON. The payload contains: battery voltage (read from ADC pin connected to battery divider), number of known neighbors, and a compressed neighbor list (up to 10 neighbor MACs with their last-seen RSSI).
+Send the beacon via routingEngine (it goes through normal flooding but with TTL=2 — beacons only need to reach 2-hop neighbors, not the entire mesh).
+When receiving a beacon from another node: update the neighbor table. Store/update the neighbor’s MAC, RSSI (from ESP-NOW receive metadata), battery voltage, timestamp, and their reported neighbor list.
+Implement a neighbor timeout: if a neighbor hasn’t been heard in 10 seconds (5 missed beacons), remove from the neighbor table and log “Node XX lost.”
+Expose getNeighborCount() and getNeighborList() for the OLED display and health reports.
+Step 7: WiFi Captive Portal and Web Interface
+This is how phones connect. Create src/app/captive_portal.h and captive_portal.cpp.
+Step 7a: WiFi Access Point
+Start WiFi in AP+STA mode (already done for ESP-NOW). Configure the SoftAP with SSID “MESH-XXXX” where XXXX is the last 4 hex digits of the node’s MAC. No password (open network for disaster access). Set max connections to MAX_PHONES_PER_NODE (4).
+Start a DNS server that responds to ALL domain queries with the ESP32’s IP (192.168.4.1). This is what triggers the captive portal popup on phones — when the phone tries to reach connectivitycheck.gstatic.com or captive.apple.com, the DNS redirects to the ESP32.
+Step 7b: Web Server
+Initialize ESPAsyncWebServer on port 80. Serve a single HTML page at “/” that contains the complete web interface (HTML + CSS + JavaScript inline in one file). Store this HTML as a PROGMEM const char[] in a separate file src/app/web_ui.h.
+The HTML page must include: a message feed div (scrollable, newest at top), a text input field with a send button, a large red SOS button, a small status bar showing “Connected to MESH-XXXX | N neighbors”, and JavaScript that establishes a WebSocket connection to ws://192.168.4.1/ws on page load.
+Add a catch-all route that redirects any URL to “/” — this ensures the captive portal works regardless of what URL the phone’s OS tries to reach.
+Step 7c: WebSocket Handler
+Initialize AsyncWebSocket at path “/ws”. Handle three event types: WS_EVT_CONNECT (log new connection, send recent message history), WS_EVT_DISCONNECT (log disconnection), WS_EVT_DATA (parse incoming JSON from phone).
+Incoming message format from phone: { "type": "msg", "text": "help us", "sender": "Anonymous" } or { "type": "sos" }. On receiving a message, call routingEngine.sendMessage() to inject it into the mesh.
+Outgoing message format to phone: { "type": "msg", "text": "...", "sender": "Node-XX", "msgType": "USER", "hopCount": 2, "timestamp": 1234567890 } or { "type": "sos", ... } or { "type": "status", "neighbors": 3, "battery": 87 }.
+When the mesh routing engine delivers a message locally, broadcast it to ALL connected WebSocket clients: ws.textAll(jsonString). This ensures every phone connected to this node sees every mesh message in real time.
+Implement a rate limiter per client: track message count per connected IP. If a client exceeds RATE_LIMIT_MSG_PER_MIN (5), respond with { "type": "error", "msg": "Rate limit reached, try again shortly" } and do not inject the message into the mesh. Exception: SOS messages are never rate-limited.
+Step 7d: Web UI Design (The HTML Page)
+The browser interface must be minimal, functional, and work on any phone browser. Design principles:
+Dark background (#1a1a2e) with light text for readability in low-light disaster conditions
+SOS button: full-width, red (#e74c3c), 60px tall, fixed at top of screen. Text: “SOS — PRESS FOR EMERGENCY”. One tap sends SOS packet into mesh.
+Message feed: scrollable div below SOS button. Each message shows sender alias, message text, and relative time (“2m ago”). No urgency colors (that’s the app’s job). Simple chronological list.
+Input area: fixed at bottom of screen. Text input + Send button side by side. Hitting Enter also sends.
+Status bar: thin bar at very top showing “MESH-A7B3 | 3 neighbors | Battery: 87%”. Updates every beacon cycle via WebSocket status messages.
+No frameworks, no external CSS, no CDN dependencies. Everything is inline in one HTML file. The page must work with zero internet.
+Total HTML size target: under 10KB. Store as gzipped PROGMEM for efficient flash usage.
+Step 7d-ii: Character Limit on Web Interface
+Critical: The web interface has NO AI classifier. Unlike the app, the browser cannot distinguish a critical SOS from noise. To prevent the mesh from being flooded with long, irrelevant messages through the browser, enforce a hard character limit of 160 characters per message (same as SMS). Implement this in two places:
+Client-side: In the HTML, set maxlength=”160” on the text input element. Add a live character counter below the input showing “47/160” that updates on every keystroke. When the user hits 160, the input stops accepting characters. This is the primary enforcement.
+Server-side: In the WebSocket handler on the ESP32, check the incoming message length. If text.length() > 160, truncate to 160 characters before injecting into the mesh. Never trust client-side validation alone — a modified browser could bypass the maxlength attribute.
+SOS messages from the browser have no character limit because they’re fixed-format packets (just node ID + timestamp) triggered by the SOS button, not free text.
+Display a notice above the input: “160 character limit. Install the MeshLink app for longer messages, AI compression, and emergency assistance.” This both explains the limit and promotes the app.
+Step 7d-iii: Keeping the Web Interface Lightweight for ESP32
+The ESP32 has 520KB total RAM, ~200KB free after WiFi stack. Every byte of the HTML page and every WebSocket connection consumes RAM. Follow these rules strictly:
+Total HTML page must be under 8KB uncompressed (about 3KB gzipped). This sounds tiny but is plenty for a functional emergency interface. For reference, Google’s original search page was under 10KB.
+Zero external dependencies: no jQuery, no React, no Bootstrap, no Google Fonts, no CDN links. Every byte is inline. The page loads from ESP32 flash memory with zero network requests.
+Minimal CSS: use a single <style> block under 1KB. Dark background (#1a1a2e), light text (#eee), red SOS button (#e74c3c), green send button (#27ae60). Use only: body, input, button, #feed, .msg, .sos-btn as selectors. No CSS animations (they consume render cycles on low-end phone browsers).
+Minimal JavaScript: the entire JS should be under 3KB. It does exactly four things: (a) open WebSocket on page load, (b) render incoming messages to the feed div, (c) send user messages on button click or Enter, (d) update the status bar from status messages.
+DOM management: keep only the last 50 messages in the feed div. When a new message arrives and the feed has 50+ children, remove the oldest. This prevents the DOM from growing unbounded and consuming phone browser memory, which eventually crashes the WebSocket connection.
+Store the HTML as a gzipped byte array in PROGMEM (flash memory, not RAM). Use the ESPAsyncWebServer’s gzip response capability: server.on(“/”, HTTP_GET, [](AsyncWebServerRequest *request){ AsyncWebServerResponse *response = request->beginResponse_P(200, “text/html”, index_html_gz, index_html_gz_len); response->addHeader(“Content-Encoding”, “gzip”); request->send(response); }). This serves the page from flash without consuming any RAM for the HTML content.
+WebSocket frame size: keep outgoing JSON messages under 200 bytes. The ESPAsyncWebServer allocates a buffer for each WebSocket message. Large frames fragment and consume multiple buffers. Short JSON with abbreviated keys: {"t":"m","s":"NodeA","x":"help us","h":2,"ts":1234567890} instead of {"type":"message","sender":"Node-A","text":"help us","hopCount":2,"timestamp":1234567890}.
+Limit concurrent WebSocket connections to 4 in the AsyncWebSocket config: ws.setMaxClients(4). If a 5th phone tries to connect, the WebSocket upgrade is rejected but the HTTP page still loads with a notice: “This node is at capacity. Try connecting to a nearby MESH node.”
+Step 7d-iv: Web UI Implementation Step-by-Step
+Build the HTML page in this order (test after each step):
+Start with a bare HTML5 skeleton: <!DOCTYPE html><html><head><meta charset=“utf-8”><meta name=“viewport” content=“width=device-width,initial-scale=1”><title>MESH</title></head><body></body></html>. Serve it from the ESP32. Verify it loads on a phone browser.
+Add the <style> block: set body background, font, margin. Style the SOS button full-width red. Style the message feed as a scrollable div with max-height. Style the input bar fixed at bottom.
+Add the SOS button HTML: a single <button> element at the top with onclick that sends the SOS WebSocket message. Test: does clicking it send a WebSocket frame? (Check ESP32 serial log.)
+Add the message feed div: an empty <div id=“feed”></div>. Add JavaScript that, on WebSocket message received, creates a new <div class=“msg”> with sender + text + time, and prepends it to the feed. Test with a hardcoded message from the ESP32.
+Add the input bar: <input type=“text” maxlength=“160”> + <button>Send</button>. Add the character counter <span>0/160</span>. Wire up the send button and Enter key to send the text via WebSocket and clear the input. Test end-to-end: type message → appears on another phone.
+Add the status bar: a thin <div> at the very top that displays node SSID, neighbor count, and battery. Update it when a WebSocket status message arrives.
+Add connection handling: show a “Connecting...” overlay when WebSocket is not connected. Auto-reconnect every 2 seconds. Show “Reconnecting...” during retry. Hide overlay when connected.
+Compress the final HTML: use gzip on the HTML file (any online gzip tool, or run gzip on command line). Convert the gzipped binary to a C byte array using xxd -i or an online bin-to-C-array converter. Paste into src/app/web_ui.h as: const uint8_t index_html_gz[] PROGMEM = { 0x1f, 0x8b, ... }; const size_t index_html_gz_len = sizeof(index_html_gz);
+Step 7e: Verify Captive Portal
+Flash one ESP32. Connect a phone to the MESH-XXXX WiFi. The captive portal should auto-popup (Android) or show a notification (iOS). The web page loads. Type a message and hit send. Verify the message appears in the ESP32’s serial log. If a second phone connects, messages from one phone should appear on the other phone’s feed in real time via WebSocket.
+Step 8: OLED Display
+Create src/app/display.h and display.cpp. Initialize the SSD1306 128x64 OLED via I2C (pins SDA=21, SCL=22 on most ESP32 dev boards).
+Display layout: Line 1 (large font): “MESH-XXXX”. Line 2: “Neighbors: N”. Line 3: “Battery: XX%”. Line 4: “Phones: N” (connected WebSocket clients). Line 5: status indicator — normally “[OK]”, changes to “[!! SOS !!]” with inverted colors when an SOS is active on the mesh.
+Update the display every 2 seconds (aligned with beacon interval). Don’t update more frequently — the I2C bus is shared and frequent updates waste cycles.
+When an SOS is received, flash the display 3 times (invert colors on/off) to visually alert anyone looking at the node.
+Step 9: SOS Hardware Button
+Create src/app/sos_button.h and sos_button.cpp.
+Connect a tactile button between a GPIO pin (e.g., GPIO 13) and GND. Enable the internal pull-up resistor in code.
+Attach an interrupt on FALLING edge. In the interrupt handler, set a volatile boolean flag sosPressed = true. Do NOT call mesh functions from inside the interrupt — interrupts must be fast.
+In the main loop, check if sosPressed is true. If so: reset the flag, create an SOS MeshPacket with msgType = MSG_SOS, and send it via routingEngine. The SOS payload contains just the node ID and timestamp. Also push the SOS to all connected WebSocket clients.
+Implement debouncing: ignore button presses within 3 seconds of the last SOS. This prevents accidental repeated broadcasting while allowing intentional re-pressing.
+Step 10: Health Beacons
+Create src/mesh/health.h and health.cpp.
+Every 30 seconds, create a HEALTH packet. Payload contains: battery voltage (ADC reading from voltage divider on battery), free heap memory (ESP.getFreeHeap()), WiFi client count (WiFi.softAPgetStationNum()), total messages relayed since boot (counter), total messages dropped (dedup counter), and uptime in seconds.
+Send as a regular mesh packet with TTL=3 (health reports don’t need to traverse the entire mesh, just reach nearby nodes and any connected Pi/phone).
+Store incoming health reports from other nodes in a small table (up to 20 entries). The app and Pi can query this table to build the node health dashboard.
+Step 11: Serial Bridge (for Pi or Laptop)
+Create src/app/serial_bridge.h and serial_bridge.cpp.
+On every message received from the mesh (via the routing engine’s local delivery callback), serialize it as a JSON line and print to Serial. Format: {"type":"msg","from":"AA:BB:CC:DD:EE:FF","text":"...","hopCount":2,"msgType":1,"timestamp":1234567890}
+Listen on Serial for incoming JSON lines from the Pi/laptop. Parse them and inject into the mesh as outgoing messages. This allows the Pi dashboard or a laptop debug tool to participate in the mesh.
+This is optional for the MVP demo but trivial to implement and extremely useful for debugging. A laptop running a serial monitor becomes a full mesh participant.
+Step 12: Main Loop Integration
+Wire everything together in main.cpp:
+setup(): Initialize Serial. Initialize RadioManager (which initializes ESP-NOW). Initialize WiFi SoftAP. Initialize DNS server. Initialize AsyncWebServer and WebSocket. Initialize OLED display. Initialize SOS button interrupt. Initialize beacon timer. Initialize health timer. Log “Node MESH-XXXX ready, N radios active.”
+loop(): Check SOS button flag. Run beacon sender if 2 seconds elapsed. Run health report if 30 seconds elapsed. Run dedup cache cleanup if 10 seconds elapsed. Run radio health recovery if 10 seconds elapsed. Update OLED display if 2 seconds elapsed. Process serial bridge input. The AsyncWebServer and ESP-NOW callbacks run in their own contexts and don’t need explicit loop handling.
+Step 13: Firmware Integration Test
+Before touching the app, verify the entire firmware works:
+Flash 3 ESP32 boards with identical firmware.
+All three should show unique MESH-XXXX SSIDs.
+Connect a phone (browser only) to each node. Send a message from Phone 1. Verify it appears on Phone 2 and Phone 3 within 100ms.
+Press the SOS button on Node C. Verify all three phones and all three OLEDs react.
+Unplug Node B. Verify messages still flow between remaining nodes (if A and C are in ESP-NOW range).
+Plug Node B back in. Verify it rejoins the mesh within 10 seconds (starts appearing in neighbor counts).
+Only proceed to the app when all of the above work flawlessly.
+
+1B. Mobile App: Android
+Step 14: Flutter Project Setup
+Create a new Flutter project: flutter create meshlink_app. Target Android only (minSdkVersion 24 for WiFi APIs).
+Add dependencies to pubspec.yaml: web_socket_channel (WebSocket), sqflite (SQLite), tflite_flutter (TF-Lite inference), path_provider, provider (state management), permission_handler.
+Create the folder structure under lib/: communication/, ai/, data/, ui/.
+Set up Android permissions in AndroidManifest.xml: ACCESS_WIFI_STATE, CHANGE_WIFI_STATE, ACCESS_FINE_LOCATION (required for WiFi scanning on Android), INTERNET (for local WebSocket — ironic but required by Android).
+Step 15: Communication Layer
+Step 15a: WiFi Connection Manager
+Create lib/communication/wifi_manager.dart.
+Implement scanForMeshNodes(): use WiFi scanning APIs to find SSIDs matching the pattern “MESH-XXXX”. Sort by signal strength. Return the list.
+Implement connectToNode(ssid): programmatically connect to the selected MESH node’s WiFi. On Android 10+, use WifiNetworkSuggestion or ConnectivityManager’s requestNetwork() API. Handle the edge case where Android tries to switch back to cellular because the mesh WiFi has no internet — use NetworkRequest with NET_CAPABILITY_NOT_RESTRICTED.
+Implement autoConnect(): scan for mesh nodes, connect to the strongest signal. If connection drops, automatically rescan and reconnect to the nearest available node.
+Expose a connectionStatus stream that the UI can listen to: SCANNING, CONNECTING, CONNECTED(nodeId), DISCONNECTED.
+Step 15b: WebSocket Manager
+Create lib/communication/ws_manager.dart.
+Once WiFi is connected, establish a WebSocket to ws://192.168.4.1/ws.
+Implement sendMessage(text, senderName): serialize as JSON { "type": "msg", "text": text, "sender": senderName } and send over WebSocket.
+Implement sendSOS(): serialize as { "type": "sos" } and send.
+Listen for incoming WebSocket messages. Parse JSON. Emit each message on a Stream<MeshMessage> that the AI layer and UI subscribe to.
+Handle reconnection: if the WebSocket closes, attempt reconnection every 2 seconds. If reconnection fails 5 times, trigger WiFi rescan to find a different node.
+Track connection health: measure ping latency, track messages received per second, expose as a stream for the UI status bar.
+Step 16: Data Layer
+Create lib/data/message_store.dart and lib/data/models.dart.
+Define a MeshMessage model class: id (auto-increment), msgId (16-byte hex string), senderNodeId, senderName, text, msgType (user/sos/beacon/health), hopCount, timestamp, urgency (string: critical/medical/logistics/info/noise — filled by AI later), credibilityScore (float 0–1), isCompressed (bool), originalText (nullable).
+Initialize SQLite database with a messages table matching the model. Add indices on timestamp and urgency for fast querying.
+Implement insertMessage(), getRecentMessages(limit), getMessagesByUrgency(urgency), getSOSMessages(), getMessageCount().
+Implement cleanup: delete messages older than 5 hours to bound storage.
+Step 17: AI Module 1 — Message Classifier
+Step 17a: Train the Model (Colab)
+In the ai_training/classifier/ folder, create a Colab notebook.
+Download the CrisisNLP dataset (publicly available, ~10K labeled disaster tweets). Map existing labels to your 5 categories: infrastructure_damage + rescue + urgent_needs → CRITICAL, medical → MEDICAL, donations + logistics → LOGISTICS, relevant_info → INFO, not_relevant + off_topic → NOISE.
+Option A (recommended for size): Train a 1D CNN text classifier. Architecture: Embedding layer (vocab 10K, dim 64) → Conv1D (128 filters, kernel 5) → GlobalMaxPool → Dense(64, relu) → Dense(5, softmax). Train for 20 epochs. Expected accuracy: 85–90%.
+Option B (higher accuracy, larger): Fine-tune MobileBERT on the same dataset. Higher accuracy (~92%) but ~25MB model instead of ~5MB.
+Export the trained model to TF-Lite format: converter = tf.lite.TFLiteConverter.from_keras_model(model), converter.optimizations = [tf.lite.Optimize.DEFAULT] (INT8 quantization), tflite_model = converter.convert(). Save as classifier.tflite.
+Also export the tokenizer vocabulary (word_index) as a JSON file: vocab.json. The app needs this to tokenize incoming text the same way the model was trained.
+Test the exported TF-Lite model on 50–100 sample messages. Verify zero misclassification on SOS-type messages (false negatives on critical messages are unacceptable). It’s okay if some noise gets promoted to info (harmless false positive).
+Copy classifier.tflite and vocab.json to mobile_app/assets/ai/classifier/.
+Step 17b: Integrate Classifier in App
+Create lib/ai/classifier.dart.
+On app startup, load the TF-Lite model using tflite_flutter: interpreter = Interpreter.fromAsset(‘ai/classifier/classifier.tflite’).
+Load vocab.json into a Map<String, int> for tokenization.
+Implement classifyMessage(String text): tokenize the text (convert words to integer indices using vocab), pad/truncate to fixed length (e.g., 50 tokens), run inference, return the class with highest probability. Return both the class label and the confidence score.
+Integrate into the message pipeline: every incoming MeshMessage from the WebSocket stream passes through classifyMessage() before being stored in SQLite and displayed. The urgency field is populated by the classifier output.
+Performance target: <10ms per classification on mid-range phones. Verify by benchmarking on actual test device.
+Step 18: AI Module 2 — NER Entity Extractor
+Step 18a: Train or Source the Model
+Option A (faster): Use a pre-trained small NER model. The tflite_flutter ecosystem has NER models based on MobileBERT-NER (~15MB). Fine-tune on 200–300 manually labeled emergency messages with entity types: PERSON_COUNT, LOCATION, INJURY_TYPE, RESOURCE_NEED, TIME_REF.
+Option B (lighter, good enough for MVP): Skip a trained NER model entirely. Build a rule-based extractor using regex patterns and keyword lists. Numbers followed by “people”/“persons”/“of us” → PERSON_COUNT. Floor/building/road/street/near/behind + following words → LOCATION. Medical keyword list (bleeding, broken, unconscious, heart attack, burn, etc.) → INJURY_TYPE. Need/require/want + following words → RESOURCE_NEED. This works surprisingly well on short emergency messages.
+For MVP, use Option B (rule-based). It’s zero additional model size and works in under 1ms. Replace with Option A in Phase 3 for better accuracy.
+Create lib/ai/ner_extractor.dart. Implement extractEntities(String text) that returns a Map<String, String> of extracted fields.
+Step 18b: Incident Card Generator
+Create lib/ai/incident_card.dart. When a message is classified as CRITICAL or MEDICAL:
+Run extractEntities() on the message text.
+Create an IncidentCard object with fields: incidentType, peopleCount, location, injuries, needs, urgency, timestamp, sourceNodeId, rawText.
+Store the incident card in a separate SQLite table (incidents). Display it prominently in the UI.
+Step 19: AI Module 3 — Message Compressor
+Create lib/ai/compressor.dart.
+Build a TF-IDF vocabulary from the emergency domain: load a pre-built JSON file (ai/compressor/emergency_vocab.json, ~0.5MB) containing 5000 emergency-relevant terms with their IDF weights. Create this vocabulary by processing the CrisisNLP dataset offline.
+Implement compress(String text): run NER extraction to identify key entities. Score remaining words by TF-IDF importance. Select the top entities and high-scoring words. Format them into a compressed template: “[count] people, [location]. [injuries]. [needs].”
+Return a CompressionResult with fields: original, compressed, compressionRatio, entities extracted.
+The UI shows both versions side-by-side. The user taps “Approve & Send Compressed” or “Send Original.” The compressed message carries a flag in the payload so recipients know it’s compressed.
+Step 20: AI Module 4 — Emergency Chatbot
+Step 20a: Build the Knowledge Base
+Create ai_training/chatbot_kb/build_kb.py. Scrape/copy emergency Q&A from WHO First Aid guidelines, Red Cross emergency protocols, NDMA disaster response manuals, and common first-aid websites. Structure each entry as: { "id": 1, "category": "medical", "question": "How to stop heavy bleeding", "answer": "1. Apply direct pressure... 2. Elevate...", "keywords": ["bleeding", "wound", "blood"], "variations": ["how to stop bleeding", "someone is bleeding heavily", "control blood loss"] }.
+Aim for 300–500 entries covering: medical first aid (CPR, bleeding, burns, fractures, choking, stroke, shock, dehydration, hypothermia), disaster protocols (earthquake: drop-cover-hold, flood evacuation, fire escape, gas leak, building collapse survival), survival basics (water purification, signaling rescue, shelter building), and coordination (triage, building marking, evacuation group management).
+Save as chatbot_kb.json (~2–3MB raw JSON).
+Step 20b: Embed the Knowledge Base
+Download the MiniLM-L6-v2 model (all-MiniLM-L6-v2) and convert to TF-Lite (~22MB). This model converts any text into a 384-dimensional vector.
+Run each Q&A entry’s question (and its variations) through MiniLM to generate embedding vectors. Store the vectors alongside the entries in a single JSON file: chatbot_kb_embedded.json (~30–35MB including vectors).
+Copy both files (MiniLM TF-Lite model and embedded KB) to mobile_app/assets/ai/chatbot/.
+Step 20c: Implement Chatbot in App
+Create lib/ai/chatbot.dart.
+On app startup, load the MiniLM model and the embedded knowledge base into memory. This takes 2–3 seconds on first launch. Show a loading indicator.
+Implement query(String userQuestion): run the user’s question through MiniLM to get a 384-dim query vector. Compute cosine similarity against all pre-embedded KB vectors. Return the top match (and optionally top 3 for “related topics” suggestions).
+If the top match confidence is below a threshold (e.g., 0.5 cosine similarity), return “I don’t have specific guidance for that. Related topics:” with the top 3 matches as tappable suggestions.
+Implement contextual suggestions: when the classifier tags an incoming message as MEDICAL, call chatbot.getRelatedProtocols(messageText) to surface relevant Q&A proactively without the user asking.
+Step 21: AI Module 5 — Credibility Scorer
+Create lib/ai/credibility.dart.
+Maintain an in-memory map of recent claims: when a message mentions a specific event ("building collapsed on Main Street"), store the claim with source node ID and timestamp.
+Corroboration check: if 2+ different source nodes report the same claim (fuzzy keyword match) within 10 minutes, increase credibility to VERIFIED.
+Consistency check: if a claim contradicts a VERIFIED claim (e.g., “bridge is intact” vs verified “bridge collapsed”), flag as DISPUTED.
+Source history: track per-node accuracy (how many of this node’s past claims were later corroborated vs disputed). New nodes start at UNVERIFIED.
+Linguistic check: messages with ALL CAPS, excessive punctuation (!!!), or known panic phrases get a small credibility penalty (but never auto-dismissed).
+Output a credibility badge on each message: VERIFIED (green), UNVERIFIED (grey), DISPUTED (orange). Display as a small icon next to the message in the feed.
+Step 22: AI Module 6 — Situational Summary
+Create lib/ai/situation_summary.dart.
+Every 30 seconds, aggregate all data from the local SQLite store: count messages by urgency, count active SOS incidents (critical messages in last 30 min that haven’t been acknowledged), count unique active nodes (from recent beacons), collect node health warnings (low battery).
+Format into a brief template: “[N] active nodes. [X] active SOS: [breakdown]. [health warnings].”
+Expose as a Stream<String> that the UI displays in a collapsible summary card at the top of the message feed.
+Step 23: AI Module 7 — Crowd Density (Stretch)
+Create lib/ai/crowd_density.dart. This processes WiFi probe count data from node health beacons.
+Each ESP32 node counts WiFi probe requests per 30-second window (implement this in firmware: in the WiFi promiscuous mode callback, count management frames with subtype = PROBE_REQUEST). Include this count in health beacons.
+The app collects probe counts from all nodes and tracks changes over time. If a node’s probe count drops significantly while a nearby node’s increases, infer crowd movement direction.
+Display as a simple indicator in the situation summary: “Crowd movement: trending NW” or “Warning: crowd accumulation near Node-XX.”
+Step 24: UI Design
+Create the Flutter UI screens. The app has four main screens accessed via a bottom navigation bar.
+Screen 1: Message Feed (Home)
+Full-screen scrollable list of messages, newest at top.
+Each message card shows: sender name, timestamp, message text, urgency color bar on left edge (red/orange/yellow/grey), credibility badge icon, hop count as subtle text.
+CRITICAL and MEDICAL messages have a distinct card style: slightly larger, bolder border, icon.
+SOS incident cards are pinned at the top of the feed with a red banner. They show AI-extracted structured fields (people, location, injury) instead of raw text.
+Noise messages are collapsed into an expandable “X other messages” section at the bottom.
+Pull-to-refresh reloads from SQLite. Real-time updates arrive via WebSocket stream.
+Situation summary card at the very top (collapsible).
+Screen 2: Compose
+Large text input field.
+“Compress” button below the input. When tapped: runs NER compressor, shows original and compressed side-by-side in a bottom sheet. User taps “Send Compressed” or “Send Original.”
+SOS button: full-width red button below the compose area. One tap sends SOS immediately.
+Send button: sends the message (original or compressed) into the mesh.
+Screen 3: Chatbot
+Simple chat interface. User types a question at the bottom.
+Response appears instantly as a formatted card with step-by-step instructions.
+Below each response: “Related topics” chips that the user can tap for more info.
+Contextual alert banner at top: if a recent SOS was received, show “Recent SOS: cardiac emergency nearby. Tap for CPR steps.”
+Screen 4: Network Status
+Connected node SSID and signal strength.
+Number of mesh nodes visible (from beacon data).
+Node health list: each known node with battery %, last seen time, relay count. Nodes with low battery highlighted in orange/red.
+Crowd density indicator (if data available from probe counts).
+Connection health: WebSocket latency, messages/second throughput.
+Step 24b: App UI Implementation Step-by-Step
+Build in this exact order. Test each screen before moving to the next.
+Navigation Shell:
+Create lib/ui/app_shell.dart. Use a Scaffold with a BottomNavigationBar containing 4 tabs: Feed (icon: message), Compose (icon: edit), Chatbot (icon: medical_services), Network (icon: wifi). Use an IndexedStack to preserve state across tab switches (so the message feed doesn’t reload when you switch to chatbot and back).
+Define the app theme in lib/ui/theme.dart. Dark theme for disaster readability: scaffoldBackgroundColor: Color(0xFF0F1923), cardColor: Color(0xFF1A2736), textTheme: white. Urgency colors as constants: critical = Color(0xFFDC2626), medical = Color(0xFFEA580C), logistics = Color(0xFFCA8A04), info = Color(0xFF64748B), noise = Color(0xFF475569).
+Message Feed Screen:
+Create lib/ui/screens/feed_screen.dart. Use a StreamBuilder listening to the WebSocket message stream (via Provider). Each incoming message triggers a rebuild.
+Create lib/ui/widgets/message_card.dart. Each card is a Container with a 4px left border colored by urgency. Inside: Row with Column (sender name in bold 12px, message text 14px, timestamp in grey 10px) and a small credibility badge icon (check/question/warning from Flutter’s built-in Icons). Card background slightly lighter than scaffold.
+Create lib/ui/widgets/sos_incident_card.dart. For CRITICAL/MEDICAL messages: distinct card with red/orange top banner, extracted fields displayed as labeled rows (People: 4, Location: 3rd floor, Injury: broken leg). Uses the incident card data from the NER extractor.
+Create lib/ui/widgets/situation_summary.dart. A collapsible ExpansionTile at the top of the feed. Header shows “3 active SOS | 12 nodes”. Expanded content shows the full rolling summary text. Updates every 30 seconds from the situation summary AI module.
+Implement feed sorting: maintain two lists internally — pinnedMessages (CRITICAL + MEDICAL, sorted by timestamp descending) and regularMessages (everything else, sorted by timestamp descending). Render pinned first, then a divider, then regular. Noise messages go into a collapsed ExpansionTile at the bottom: “Show X low-priority messages.”
+Add pull-to-refresh using RefreshIndicator wrapping a ListView.builder. On refresh, reload the last 100 messages from SQLite.
+Compose Screen:
+Create lib/ui/screens/compose_screen.dart. Layout: Column with a large TextField (maxLines: 6, autofocus: false, decoration with hint: “Describe your situation...”), a character counter Text widget below it, a Row with two buttons: “Compress” (outlined blue) and “Send” (filled green), and a full-width red SOS button at the bottom with 56px height.
+The Compress button: when tapped, call compressor.compress(textController.text). Show a BottomSheet (showModalBottomSheet) with two cards side by side — left card labeled “Original (284 chars)” with the full text, right card labeled “Compressed (82 chars)” with the compressed text. Two buttons at the bottom: “Send Compressed” and “Send Original.” Both close the sheet and send the chosen version via WebSocket.
+The SOS button: show a confirmation dialog (AlertDialog with “This will broadcast an emergency alert to the entire mesh. Continue?”) before sending. This prevents accidental taps. Once confirmed, send the SOS and show a green snackbar: “SOS broadcast sent.”
+Add a “Hold to Speak” button (Phase 3 stretch goal placeholder): for now, just a greyed-out microphone icon button with tooltip “Voice input coming soon.” Enable it in Phase 3 when STT is implemented.
+Chatbot Screen:
+Create lib/ui/screens/chatbot_screen.dart. Layout: a ListView of chat bubbles (user questions right-aligned in blue, chatbot responses left-aligned in dark card), a TextField at the bottom with a send icon button.
+Create lib/ui/widgets/chatbot_response_card.dart. The chatbot response is displayed as a formatted card, not plain text. Title (bold 16px): the matched Q&A title (e.g., “CPR — Cardiopulmonary Resuscitation”). Body (14px): the step-by-step answer with numbered steps. Footer: a row of ActionChip widgets showing 2–3 related topics. Tapping a chip auto-queries the chatbot with that topic.
+Contextual alert: at the top of the chatbot screen, check if any CRITICAL or MEDICAL SOS has been received in the last 10 minutes. If so, show a tappable MaterialBanner: “Recent SOS nearby: [incident type]. Tap for relevant guidance.” Tapping auto-queries the chatbot with the incident type.
+Network Status Screen:
+Create lib/ui/screens/network_screen.dart. Layout: Column with a ConnectionStatusCard at top (shows connected node SSID, signal strength icon, WebSocket latency), a Divider, then a ListView of NodeHealthCard widgets for each known mesh node.
+Create lib/ui/widgets/node_health_card.dart. Each card shows: node ID (MESH-XXXX), battery level as a LinearProgressIndicator (green >50%, orange 20–50%, red <20%), last seen time, relay count, and a warning icon if battery is predicted to fail soon.
+At the bottom: a simple text widget showing crowd density estimate if available, and the total mesh node count.
+Step 24c: App State Management
+Use the Provider package for state management across the app:
+Create lib/data/app_state.dart extending ChangeNotifier. This holds: connectionStatus, currentNodeId, List<MeshMessage> recentMessages, List<IncidentCard> activeIncidents, SituationSummary currentSummary, Map<String, NodeHealth> nodeHealthMap.
+The WebSocket manager pushes incoming messages to AppState. AppState runs the classifier, updates the message list, notifies listeners (which triggers UI rebuilds). This keeps the data flow unidirectional: WebSocket → AppState → UI.
+Wrap the entire app in a MultiProvider in main.dart, providing AppState, WsManager, and WiFiManager. All screens access state via Provider.of<AppState>(context) or context.watch<AppState>().
+Step 25: App Integration Test
+The same comprehensive test as firmware Step 13, but now with the app:
+Install the app on 2–3 Android phones.
+Connect each phone to a different mesh node.
+Send a message from Phone 1. Verify it appears on Phone 2 and Phone 3, with urgency classification and correct color coding.
+Send a message that should classify as CRITICAL (e.g., “building collapsed, 5 people trapped on 3rd floor”). Verify all phones show it pinned in red with extracted incident card fields.
+Open the chatbot on Phone 2. Ask “how to do CPR.” Verify instant response.
+Type a long message on Phone 1. Tap Compress. Verify side-by-side comparison appears. Approve compressed. Verify compressed version arrives on other phones with compression flag.
+Connect a phone WITHOUT the app to a mesh node via browser. Verify the web captive portal works. Send a message from browser. Verify it appears in all app feeds with classification. Send a message from app. Verify it appears in the browser feed (plain, no classification).
+Press the physical SOS button on a node. Verify all phones (app and browser) receive it. App phones show structured card. Browser phone shows raw SOS text.
+Unplug one node. Verify mesh continues. Plug it back. Verify it rejoins.
+Phase 1 is complete when ALL of the above work perfectly.
+
+1C. Central Node (Laptop or Raspberry Pi 5)
+The central node is a laptop (for development and demo) or a Raspberry Pi 5 (for a more polished setup) that connects to the mesh via one ESP32 node over USB serial. It provides a big-screen command dashboard with logistics capabilities that individual phones cannot offer. It is NOT the AI brain (that’s on each phone) and it is NOT required for the mesh to function (the system works without it). It is an optional but powerful addition for response team coordination.
+Step 25b: Central Node Architecture
+The central node runs a Python backend + browser-based dashboard. It connects to the mesh through the serial bridge (Step 11) on one ESP32.
+central_node/
+  server.py            ← Python Flask/FastAPI backend
+  serial_mesh.py       ← Serial reader/writer to ESP32
+  message_store.py     ← SQLite storage
+  classifier.py        ← Same TF-Lite classifier as the app
+  templates/
+    dashboard.html     ← Full-screen command dashboard
+  static/
+    dashboard.js       ← Real-time WebSocket-driven UI
+    dashboard.css      ← Dark theme styling
+Step 25c: Serial Mesh Bridge (Python)
+Create central_node/serial_mesh.py.
+Use the pyserial library (pip install pyserial). Open the ESP32’s serial port at 115200 baud. Auto-detect the port by scanning for USB serial devices matching ESP32 vendor IDs (10C4 for CP2102, 1A86 for CH340).
+Read incoming JSON lines from Serial (each line is a mesh message forwarded by the ESP32 serial bridge from Step 11). Parse each line and push to the message store and to the WebSocket for the dashboard.
+To send a message INTO the mesh: serialize as JSON, write to Serial. The ESP32 serial bridge injects it into the mesh as an outgoing packet. This is how the central node communicates with individual nodes or broadcasts to all.
+To send to a SPECIFIC node: set the destination field in the JSON to that node’s MAC address instead of broadcast (0xFF). The mesh routing engine delivers it only to the target node. This enables the central node to individually communicate with each node — send commands, request health data, or relay messages targeted to specific areas.
+Step 25d: Central Node Backend (Python)
+Create central_node/server.py using Flask + Flask-SocketIO (pip install flask flask-socketio pyserial).
+On startup: open serial connection to ESP32, initialize SQLite database (same schema as the app’s message store), start a background thread that continuously reads serial and stores messages.
+Run the same TF-Lite classifier (pip install tflite-runtime) on every incoming message. Tag urgency the same way the app does. This gives the dashboard urgency color-coding identical to the app.
+Serve the dashboard HTML at http://localhost:5000. The dashboard opens in a browser on the laptop screen or on a tablet connected to the laptop’s WiFi.
+WebSocket endpoint: Flask-SocketIO pushes every new message, node health update, and SOS incident to the dashboard in real time. The dashboard JS receives these and updates the DOM.
+Step 25e: Central Node Dashboard Features
+The dashboard provides capabilities that no single phone can offer because it aggregates data from the entire mesh and has a large screen for command visualization.
+Feature 1: Mesh Topology Visualization
+Display all known nodes as circles on a canvas. Connect them with lines based on neighbor relationships from beacon data. Color each node by health: green (healthy), orange (warning — battery <30% or high packet loss), red (critical — battery <15% or offline). Animate message flow as pulses along the connection lines.
+Implementation: use a simple HTML5 Canvas or SVG. Nodes are positioned using a force-directed layout (or manually by the operator via drag-and-drop). Update positions and connections every beacon cycle (2 seconds).
+Feature 2: Full Message Feed with Urgency Filtering
+Show all mesh messages classified by urgency (same color scheme as the app). Add filter buttons at the top: “All | Critical | Medical | Logistics | Info.” Noise messages are hidden by default but accessible via a toggle.
+The dashboard’s feed shows metadata the app doesn’t: the node that originated the message, the number of hops it traveled, which nodes relayed it (from beacon data), and the classifier’s confidence score.
+Feature 3: Active SOS Incident Board
+A dedicated panel showing all active SOS incidents as structured cards (using the same NER extraction). Each card shows: incident type, people count, location, injuries, time since reported, and source node.
+The operator can click “Acknowledge” on an incident. This sends an ACK message back through the mesh to the originating node, which relays it to the SOS sender’s phone: “Your SOS has been received. Help is being coordinated.” This closes the loop for trapped civilians.
+The operator can click “Respond” and type a message that is sent ONLY to the specific node that originated the SOS (using the unicast destination field). This enables private command-to-field communication without broadcasting to the entire mesh.
+Feature 4: Node-Level Logistics and Communication
+This is the central node’s unique power: individual communication with specific nodes.
+The topology view shows each node. The operator can click on any node and see: its battery level, how many phones are connected, how many messages it’s relayed, its neighbor list, and its health history (battery trend over time).
+The operator can send a direct message to any individual node. The message is addressed to that node’s MAC (unicast). Only that node’s connected phones see it. Use cases: “Shelter B: evacuation order, move to high ground immediately” or “Medical team at Node 7: cardiac patient reported at Node 3, proceed there.”
+The operator can send a broadcast message tagged as “COMMAND” — these appear with a distinct blue banner on all phones and the browser interface, visually distinct from user messages. Used for: general evacuation orders, safety all-clears, resource drop announcements.
+Battery logistics: the dashboard sorts nodes by predicted battery depletion time. The operator sees: “Node 3: 23 min remaining, serving 4 phones, critical relay for Cluster B.” This lets the operator dispatch a runner to replace the battery before the node dies and creates a coverage gap.
+Resource allocation: the operator can annotate nodes with logistics data — “Node 5 is at the medical tent,” “Node 8 is at the water distribution point.” These annotations appear on the topology map, building a live logistics picture of the disaster response.
+Feature 5: Situation Summary Generation
+The same template-based aggregation as the phone app, but with more data: total nodes, total phones, total messages by category, active SOS count with breakdown, average battery across mesh, predicted next node failure, crowd density trends from probe counts.
+Displayed as a text panel that auto-updates every 30 seconds. The operator can copy it and relay it via any available channel (radio, satellite phone) to off-mesh coordination centers.
+Feature 6: Message Export
+An “Export” button downloads the complete message log as a CSV file: timestamp, sender, text, urgency, hop_count, credibility. This is valuable for post-disaster analysis, insurance claims, and accountability.
+Step 25f: Dashboard UI Implementation
+The dashboard is a single-page HTML file served by Flask. Build it in this order:
+Start with a basic Flask app that serves an empty HTML page and establishes a SocketIO connection to the Python backend. Verify: open localhost:5000 in a browser, check the console for “Connected.”
+Add the message feed panel: a scrollable div on the left side (60% width) that receives messages via SocketIO and renders them as cards with urgency color bars. Add filter buttons.
+Add the SOS incident board: a panel on the right side (40% width) showing active SOS cards. Add Acknowledge and Respond buttons on each card. Wire the Respond button to open a text input that sends a unicast message via the serial bridge.
+Add the topology canvas: an HTML5 Canvas element at the top right. Draw nodes as circles with labels, lines between neighbors. Color by health. Update every 2 seconds from beacon data received via SocketIO.
+Add the node detail panel: when a node circle is clicked on the topology canvas, a side panel slides in showing that node’s details. Add a “Send Direct Message” text input and button. Wire it to send unicast via the serial bridge.
+Add the situation summary panel: a fixed bar at the very top showing the rolling text summary. Auto-updates every 30 seconds.
+Style everything dark theme: background #0F1923, cards #1A2736, text #E2E8F0. Use a monospace font for the situation summary to give it a “command center” feel.
+Step 25g: Central Node Integration Test
+Connect the laptop to one ESP32 node via USB. Start the Python server.
+Open the dashboard in a browser. Verify: nodes appear on the topology as other ESP32s beacon.
+Send a message from a phone (app or browser) on the mesh. Verify it appears in the dashboard feed with correct urgency classification.
+Press SOS on a remote node. Verify the SOS incident card appears on the dashboard. Click Acknowledge. Verify the ACK reaches the sender’s phone.
+Click on a node in the topology. Send a direct message. Verify only that node’s connected phones receive it (other nodes don’t show it).
+Send a COMMAND broadcast from the dashboard. Verify all phones and browser interfaces show it with a distinct visual style.
+Check battery predictions: verify nodes are sorted by predicted depletion time and warnings appear for low-battery nodes.
+The central node is optional but dramatically strengthens the demo. A big screen showing a live command center while judges hold nodes and use phones on the mesh is extremely impressive.
+
+PHASE 2    LoRa Integration
+Goal: Add LoRa modules to existing nodes. The radio abstraction layer from Phase 1 makes this additive — no existing code is modified, only new code is added.
+Step 26: LoRa Hardware Wiring
+Connect the SX1262 LoRa module to the ESP32 via SPI. Typical wiring: MOSI → GPIO 27, MISO → GPIO 19, SCK → GPIO 5, NSS → GPIO 18, RESET → GPIO 14, DIO1 → GPIO 26, BUSY → GPIO 35. These pins must not conflict with the OLED (I2C: 21, 22) or SOS button (GPIO 13). Verify no pin conflicts before soldering.
+Attach the IPEX antenna to the LoRa module’s antenna connector. Never power on a LoRa module without an antenna — it can damage the radio chip.
+Power the LoRa module from the ESP32’s 3.3V rail. The SX1262 draws ~120mA during transmit, which is within the ESP32’s regulator capacity.
+Step 27: LoRa Driver Implementation
+Fill in the stub from Phase 1: src/radio/lora_driver.cpp.
+Install the RadioLib library (supports SX1262 natively). Initialize with the correct pin mapping.
+In init(): call radio.begin(865.0625) to set frequency to the first IN865 channel. Set bandwidth to 125 kHz, spreading factor to 7 (fastest/shortest range — sufficient for demo), coding rate to 4/5. Set output power to 14 dBm (legal limit for IN865). If begin() fails, log the error and set status to FAILED. Return success/fail.
+In send(): call radio.transmit(data, len). Wrap in try-catch. Track consecutive failures same as ESP-NOW driver. The transmit is blocking and takes 100–300ms for a 200-byte packet at SF7. This is expected.
+For receive: start radio.startReceive() after each transmit and on init. Implement a poll in the main loop: if radio.available(), read the packet and pass to the registered callback. Alternatively, use DIO1 interrupt for receive notification.
+The receive callback passes raw bytes to the same unified RadioManager callback. The mesh layer processes LoRa-received packets identically to ESP-NOW packets — same dedup, same TTL, same everything.
+Step 28: Enable Dual-Radio
+In config.h, change #define USE_LORA 0 to #define USE_LORA 1.
+Recompile and flash. The RadioManager now initializes both ESP-NOW and LoRa drivers. On send(), it dispatches to both. If LoRa init fails (module not wired), the try-catch catches it, logs “LoRa init failed, ESP-NOW only”, and continues.
+Test: place two nodes far apart (beyond ESP-NOW range but within LoRa range — e.g., different floors of a building, or across a campus). Send a message. Verify it arrives via LoRa (check serial logs to confirm which radio received it).
+Test dual-radio dedup: place two nodes within both ESP-NOW and LoRa range. Send a message. Node B receives it twice (once on ESP-NOW, once on LoRa). Verify the dedup cache drops the second copy. Only one message appears on the phone.
+Step 29: Record Range Video
+Set up nodes across campus or neighborhood at increasing distances. Record a video showing messages being sent from one node and received at another 500m, 1km, 2km away. This video is played during the demo when judges ask about range.
+Phase 2 is complete when LoRa works alongside ESP-NOW and a range video is recorded.
+
+PHASE 3    Refinements & Polish
+Goal: Add production features, security hardening, physical assembly, and demo polish. These are all additive — nothing from Phase 1 or 2 is rewritten.
+Step 30: Auto-Clustering
+In src/mesh/clustering.h and clustering.cpp, implement the cluster logic. Add a function shouldActivateClustering(): return true if getNeighborCount() across 2 hops exceeds NODE_COUNT_CLUSTER_THRESHOLD (15).
+Implement computeLeaderScore(): primary factor is battery voltage (higher = better). Tie-breaker is the lowest MAC address (deterministic, no ambiguity). Return a uint32_t score.
+Broadcast the score in beacons (add a field). Each node independently determines who the leader is by comparing all received scores. If this node has the highest score, it becomes cluster head.
+Modify the routing engine: if clustering is active and this node is NOT the cluster head, send messages only to the cluster head (unicast via ESP-NOW peer, not broadcast flood). The cluster head handles inter-cluster forwarding.
+The clustering code exists in the firmware from the start but is dormant at <15 nodes. It activates automatically when the threshold is crossed. This means the same binary is deployed to every node regardless of network size.
+Step 31: Encryption
+Implement AES-128 encryption on all mesh packets. The ESP32 has a hardware AES accelerator accessible via mbedtls. Add a shared pre-distributed key in config.h (for MVP). Encrypt the payload portion of every packet before sending. Decrypt on receive before processing.
+Add message signing: compute a 4-byte HMAC of the packet header+payload using the shared key. Append to packet. On receive, verify HMAC before processing. Drop packets with invalid signatures.
+Step 32: Acoustic Sensing (App Stretch Goal)
+Train a small audio CNN on UrbanSound8K dataset. Classes: explosion, structural_collapse, gunshot, screaming, siren, heavy_rain, silence. Architecture: Mel spectrogram input → 3x Conv2D → GlobalAvgPool → Dense(7, softmax). Export to TF-Lite (~3MB).
+In the app, create lib/ai/acoustic_sensor.dart. Request microphone permission. Capture audio in 3-second windows. Convert to mel spectrogram. Run classifier. If a non-silence class exceeds 70% confidence, send a small mesh message: { "type": "acoustic", "class": "explosion", "confidence": 0.84 }.
+Display received acoustic events in the situation summary: “Multiple nodes near Cluster B reporting collapse sounds.”
+Step 33: Voice-to-Text Pipeline (App Stretch Goal)
+Implement a “Hold to Speak” button on the Compose screen. Use Android’s built-in SpeechRecognizer (offline mode, no additional model download needed on most phones). Capture speech, transcribe to text.
+Pipe the transcribed text through the NER compressor (Step 19). Show original transcription and compressed version side-by-side. User approves before sending.
+This enables hands-free emergency reporting. A person with injured hands or in darkness can speak their emergency into the mesh.
+Step 34: Delay-Tolerant Networking
+In the routing engine, add a message buffer for undeliverable packets (destinations in clusters that can’t be reached). When a new neighbor appears (detected via beacons) that is closer to the target cluster, flush buffered messages to that neighbor.
+This “message ferrying” allows messages to travel across physical gaps in the mesh by riding in a moving person’s pocket until they reach the target area.
+Step 35: 3D-Printed Enclosure
+Design the enclosure in any CAD tool (Fusion 360, TinkerCAD, FreeCAD). Internal dimensions must fit: ESP32 dev board (~50x28mm), OLED display (~27x27mm visible area), LiPo battery (~50x30x8mm), TP4056 module (~26x17mm), and SOS button (12mm diameter).
+External target: ~80x50x25mm. Features: window cutout for OLED, hole for SOS button with red button cap protruding, USB-C slot aligned with TP4056 port, ventilation slots on sides, belt clip or lanyard loop on back, “MESH” text embossed on front.
+Print in PLA or PETG. Print 3–4 enclosures for the full demo set. Sand, clean, and optionally paint.
+Step 36: Final Assembly
+Solder header pins to OLED modules if not pre-soldered. Solder wires from OLED to ESP32 (SDA, SCL, VCC, GND). Solder SOS button wires to GPIO and GND. Solder TP4056 output to ESP32 VIN/GND. Connect LiPo to TP4056 battery pads. If LoRa module is included, solder the SPI wires.
+Test each assembled node individually: power on, verify OLED displays, verify WiFi AP appears, verify SOS button triggers, verify LoRa (if wired) initializes.
+Place all components into 3D-printed enclosures. Route wires neatly. Secure with hot glue or foam tape if needed.
+Step 37: Demo Preparation
+Prepare APK distribution: build a release APK. Host it on one ESP32 node as a downloadable file (or prepare USB drives with the APK, or generate a QR code pointing to the node’s local download URL).
+Write a demo script: step-by-step sequence of what happens during the 5-minute demo (who does what, when). Rehearse multiple times.
+Prepare for failure scenarios: what if a node doesn’t boot? (bring a spare). What if WiFi connection is slow? (pre-connect phones before judges arrive). What if LoRa doesn’t work? (demo on ESP-NOW, show LoRa driver code).
+Charge all batteries fully. Flash all nodes with identical firmware. Test the complete system one final time.
+Phase 3 is complete when the system is physically assembled, polished, and demo-ready.
+
+Appendix: Component Verification Checklist
+Use this checklist to verify each component works before integration:
+Item
+Status
+Notes
+ESP-NOW: 2 nodes exchange packets
+☐
+
+ESP-NOW: 3-node multi-hop works
+☐
+
+Dedup: duplicate packets dropped
+☐
+
+TTL: packets stop at TTL=0
+☐
+
+Beacons: neighbor count updates
+☐
+
+Captive portal: phone auto-redirects
+☐
+
+WebSocket: bidirectional messaging
+☐
+
+OLED: displays neighbor count + battery
+☐
+
+SOS button: broadcasts to all nodes
+☐
+
+Rate limiting: 6th message in 1 min blocked
+☐
+
+App: connects to mesh node WiFi
+☐
+
+App: classifier tags messages correctly
+☐
+
+App: SOS creates incident card
+☐
+
+App: compressor shows side-by-side
+☐
+
+App: chatbot responds instantly
+☐
+
+App: credibility badges display
+☐
+
+App: situation summary updates
+☐
+
+Browser + App: coexist on same node
+☐
+
+Node removal: mesh self-heals
+☐
+
+LoRa: packets exchange at >200m
+☐
+
+LoRa: try-catch degrades gracefully
+☐
+
+Dual radio: dedup works across radios
+☐
+
+Enclosure: all components fit
+☐
+
+Full demo: 5-minute run-through clean
+☐
+
+
+
+Team Ramuloo Ramulaa  •  Makeathon 2026

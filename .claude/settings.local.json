@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "Bash(git:*)",
+      "Bash(flutter --version)",
+      "Bash(pio --version)",
+      "Bash(pip show:*)",
+      "Bash(code --version)",
+      "Bash(echo $ANDROID_HOME)",
+      "Bash(echo $ANDROID_SDK_ROOT)",
+      "Read(//c/flutter/bin/**)",
+      "Read(//c/Users/user/flutter/bin/**)"
+    ]
+  }
+}
